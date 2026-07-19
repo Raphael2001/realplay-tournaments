@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TournamentStatus {
+  ACTIVE
+  FINALIZED
+}
+
+model Tournament {
+  id        String            @id @default(uuid())
+  name      String
+  startsAt  DateTime
+  endsAt    DateTime
+  status    TournamentStatus  @default(ACTIVE)
+  createdAt DateTime          @default(now())
+
+  tournamentBets TournamentBet[]
+  placements     TournamentPlacement[]
+
+  @@index([startsAt, endsAt])
+}
+
+// One row per externally reported bet event. externalBetId is globally
+// unique so re-sending the same event never creates a second raw bet.
+model Bet {
+  id             String   @id @default(uuid())
+  externalBetId  String   @unique
+  playerId       String
+  amount         Int
+  currency       String
+  createdAt      DateTime
+  receivedAt     DateTime @default(now())
+
+  tournamentBets TournamentBet[]
+
+  @@index([playerId])
+}
+
+// Join row recording that a given bet was accepted into a given tournament.
+// The unique constraint is the idempotency boundary: a duplicate bet event
+// hitting the same tournament fails this insert and is silently skipped.
+model TournamentBet {
+  id           String   @id @default(uuid())
+  tournamentId String
+  betId        String
+  playerId     String
+  amount       Int
+  createdAt    DateTime @default(now())
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+  bet        Bet        @relation(fields: [betId], references: [id])
+
+  @@unique([tournamentId, betId])
+  @@index([tournamentId, playerId])
+}
+
+// Final placements written once by the snapshot job after endsAt.
+model TournamentPlacement {
+  id           String @id @default(uuid())
+  tournamentId String
+  playerId     String
+  score        Int
+  rank         Int
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+
+  @@unique([tournamentId, playerId])
+  @@index([tournamentId, rank])
+}
